@@ -1,0 +1,2 @@
+"""MASLab-style method namespace."""
+

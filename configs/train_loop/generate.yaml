@@ -1,0 +1,123 @@
+run:
+  output_dir: output
+  version_prefix: v
+  iteration_name: iteration1
+  resume_iteration: null
+steps:
+  reasoning:
+    enabled: true
+  expand:
+    enabled: true
+  prune:
+    enabled: true
+  export:
+    enabled: true
+  start_from: auto
+  execution_mode: tree
+  tree_max_concurrency: 50
+shared:
+  root_dir: .
+  evaluation_dir: data/model_evaluations
+  orchestra_model: qwen3-vl-8b
+  candidate_models: configs/models.yaml
+reasoning:
+  main_use_images: true
+  orchestra_endpoint: local
+  # orchestra_local_base_url / orchestra_model are overridden per-iteration by
+  # train_loop.py from vllm.port / vllm.served_model_name; the values here only
+  # apply when running generate_mcts.py standalone (without the loop).
+  orchestra_local_base_url: http://127.0.0.1:8032/v1
+  orchestra_local_temperature: 1.1
+  delegate_endpoint: remote
+  delegate_openai_base_url_env: base_url
+  delegate_openai_api_key_env: api_key
+  delegate_local_api_key_env: api_key
+  dataset_name: data/train_combined.json
+  dataset_split: train
+  discipline: all
+  sample_count: 50
+  sample_seed: 42
+  tree_seed: 42
+  tree_budget_usd: 3.0
+  target_leaf_trajectories: 64
+  branching_factor: 2
+  orchestra_samples_per_prompt: 4
+  instruction_similarity_model_name: sentence-transformers/all-MiniLM-L6-v2
+  instruction_similarity_batch_size: 32
+  instruction_similarity_local_files_only: false
+  frontier_limit: null
+  sibling_pool_strategy: sample
+  node_model_pool_size: 4
+  node_max_steps: 8
+  max_concurrency: 50
+  show_progress: true
+  candidate_models: []
+expand:
+  start_stage: all_wrong
+  max_concurrency: 50
+  random_seed: 42
+  # Optional override that builds the per-task model pool from a prior reasoning
+  # run before the current iteration's reasoning output exists. Leave null to use
+  # the documented pool source (shared.evaluation_dir / data/model_evaluations),
+  # which is what the train_loop expects per iteration. Set to a specific
+  # <output_root>/<version>/<iterationN>/reasoning/<model> path only for a manual,
+  # one-off pool build.
+  pool_base_run_dir: null
+  candidate_models: []
+  stages:
+  - stage_name: all_wrong
+    selector: all_wrong
+    reopen_node_strategy: uniform_random_expandable_node
+    child_pool_strategy: single_random_from_task_pool
+    child_pool_size: 5
+    leaf_acc_threshold: 0.5
+    tree_budget_usd: 3.0
+    max_final_leaf_count: 64
+    frontier_limit: 8
+    random_seed_offset: 0
+  - stage_name: below_threshold
+    selector: leaf_acc_band
+    leaf_acc_min_exclusive: 0.0
+    leaf_acc_max_exclusive: 0.5
+    reopen_node_strategy: child_expected_acc_gap_weighted
+    child_pool_strategy: single_random_from_task_pool
+    child_pool_size: 5
+    leaf_acc_threshold: 0.5
+    tree_budget_usd: 4.0
+    max_final_leaf_count: 64
+    frontier_limit: 8
+    random_seed_offset: 1
+  orchestra_samples_per_prompt: 4
+  orchestra_endpoint: local
+  orchestra_local_base_url: http://127.0.0.1:8032/v1
+  orchestra_local_temperature: 1.1
+  branching_factor: 2
+  dataset_name: data/train_combined.json
+  dataset_split: train
+prune:
+  max_children: 4
+  spread_max_children: 8
+  selection_mode: spread
+  drop_error_terminal_nodes: true
+  drop_invalid_submit_nodes: true
+  drop_all_wrong_trees: false
+  overwrite: true
+export:
+  dataset_name: data/train_combined.json
+  dataset_split: train
+  dataset_type: ppo
+  completion_mode: full
+  record_style: minimal
+  prompt_source: template
+  prompt_config: configs/train_loop/reasoning.yaml
+  filter_fallback: true
+  actor: main
+  include_self_delegate_with_main: false
+  max_completion_chars: 2500
+  max_messages_chars: 70000
+  drop_invalid_completion_json: true
+  normalize_submit_action_line: true
+  resolve_images: auto
+  image_storage_mode: file_paths
+  image_path_style: absolute
+  overwrite_images_dir: true

@@ -1,0 +1,17 @@
+main_use_images: true
+main_model: qwen3-vl-8b
+main_model_endpoint: local
+main_local_base_url: http://127.0.0.1:8032/v1
+main_local_api_key: EMPTY
+main_local_api_key_env: OPENAI_API_KEY
+main_local_temperature: 0.7
+main_max_tokens: 4000
+sub_models: configs/models.yaml
+enable_scoring: false
+judge_model: o4-mini
+output_dir: results/v9
+max_samples: 0
+max_steps: 8
+max_concurrency: 49
+discipline: all
+dataset_name: data/train_combined.json

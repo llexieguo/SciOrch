@@ -1,0 +1,121 @@
+# Train-generate loop config.
+# Run:
+#   cd <repo root>
+#   python scripts/train_loop.py --config configs/train_loop/loop.yaml
+#
+# Each iteration:
+#   1. Start vLLM (tmux session) serving the model from the previous iteration (or base_model for iter 1).
+#   2. Run MCTS data generation (swift conda env).
+#   3. Kill vLLM to free GPU VRAM.
+#   4. Run offline-REINFORCE training (swift conda env).
+#   5. Copy golden tokenizer_config.json over the saved checkpoint.
+#   6. Write done.marker + latest_checkpoint.txt, advance to next iteration.
+#
+# Manual markers (reuse a checkpoint you copied in — typical workflow):
+#   Copy the whole checkpoint-* directory into iterationN/training/ (keep the folder name,
+#   e.g. checkpoint-600). Then record it so the loop skips re-training and the next iteration
+#   can load it:
+#     TRAIN_DIR=<output_root>/<version>/iterationN/training
+#     CHECKPOINT_DIR="$TRAIN_DIR/checkpoint-STEP"   # the copied dir; must exist here
+#     echo "$CHECKPOINT_DIR" > "$TRAIN_DIR/latest_checkpoint.txt"
+#     printf 'done\n' > "$TRAIN_DIR/done.marker"
+#   train_loop.py skips training when done.marker exists; pick_serving_model reads
+#   latest_checkpoint.txt (one line, absolute path), else the highest checkpoint-* under training/.
+#   If training finished but the process exited before writing markers, train_loop.py may still
+#   skip re-training when the latest checkpoint's trainer_state.json epoch >= NUM_EPOCHS (env_overrides).
+
+loop:
+  num_iterations: 3
+  output_root: output
+  version: v6                   # all iterations live under <output_root>/<version>/
+  iteration_prefix: iteration    # dirs become iteration1, iteration2, ...
+  # Model used for iteration 1 (no prior training checkpoint yet).
+  base_model: ../../model/qwen3-vl-8b-instruct
+
+generate:
+  # Template mcts_generate.yaml; per-iteration overrides are applied at runtime.
+  mcts_config_template: configs/train_loop/generate.yaml
+  fold_splits: configs/train_loop/folds/fold_splits.json
+  conda_env: maso
+  cwd: .
+
+vllm:
+  # A new detached tmux session is created here to run vLLM.
+  # It inherits the GPU lease from the current terminal (the SSH session with GPU access).
+  tmux_session: vllm_serve
+  conda_env: vllm
+  # Passed to vLLM as --tokenizer (useful when --model points at a LoRA/trained dir).
+  tokenizer: ../../model/qwen3-vl-8b-instruct
+  host: 0.0.0.0
+  port: 8032
+  served_model_name: qwen3-vl-8b
+  tensor_parallel_size: 2
+  cuda_visible_devices: "0,1"
+  max_model_len: 32768
+  gpu_memory_utilization: 0.95
+  # Local probe host for readiness checks (server itself still listens on vllm.host).
+  probe_host: 127.0.0.1
+  # Readiness check order; any endpoint returning HTTP 200 is treated as ready.
+  probe_paths: ["/health", "/v1/models"]
+  # Per-request timeout (seconds) for readiness probes.
+  probe_timeout_s: 10
+  # How long (seconds) to wait for the API server to become ready.
+  ready_timeout_s: 240
+  # Poll interval for readiness checks.
+  ready_poll_interval_s: 3
+  # One final probe timeout before declaring startup failure.
+  deadline_probe_timeout_s: 20
+  # How long (seconds) to wait after tmux kill for VRAM to drain.
+  shutdown_grace_s: 60
+
+train:
+  script: scripts/train/lora_clip.sh
+  conda_env: swift
+  cwd: .
+  cuda_visible_devices: "0,1"
+  # Same-iteration crash resume: only when true, pass RESUME_FROM_CHECKPOINT from the latest
+  # checkpoint-* already under this iteration's training/ (e.g. interrupted mid-run).
+  # Default false — avoids "training finished but done.marker missing" being treated as resume.
+  resume_partial_training: false
+  # Iteration N>=2: trainer gets RESUME_FROM_CHECKPOINT = previous iteration's latest ckpt
+  # (needs SAVE_ONLY_MODEL false) so optimizer/scheduler/trainer_state carry over; --model
+  # also points at that ckpt for weights. Same-iteration crash resume uses the latest ckpt
+  # under the current OUTPUT_DIR when resume_partial_training is true.
+  resume_from_previous_iteration: true
+  # W&B run id will be "<wandb_run_id_prefix>_<loop.version>", e.g. offline_loop_v0.
+  # This gives one W&B run per version directory (all iterations append to it).
+  wandb_run_id_prefix: offline_loop
+  # These are forwarded to lora.sh as environment-variable overrides.
+  # Any key not listed here falls back to the default hardcoded in lora.sh.
+  env_overrides:
+    NUM_EPOCHS: 3
+    LEARNING_RATE: "1e-6"
+    BATCH_SIZE: 1
+    GRAD_ACCUM: 64
+    MAX_LENGTH: 24578
+    SAVE_STRATEGY: epoch
+    SAVE_STEPS: 200
+    SAVE_TOTAL_LIMIT: 1
+    LOAD_BEST_MODEL_AT_END: "true"
+    # false -> optimizer.pt + scheduler.pt + trainer_state.json are saved, enabling resume.
+    SAVE_ONLY_MODEL: "false"
+    LOGGING_STEPS: 5
+    EVAL_RATIO: "0.01"
+    KL_COEF: "0.02"
+    KL_ESTIMATOR: ppo_clip
+    CLIPRANGE: "0.2"
+    WHITEN_ADVANTAGES: "true"
+    USE_RANK_ADVANTAGE: "false"
+    REWARD_KEY: expected_acc_reward
+    ANSWER_KEY: answer
+    REWARD_KEYS: expected_acc_reward
+    REWARD_WEIGHTS: "1.0"
+    REPORT_TO: wandb
+    WANDB_PROJECT: offline-reinforce-loop
+    WANDB_MODE: offline
+
+tokenizer_fix:
+  # Path to the known-good tokenizer_config.json from the base model checkout.
+  golden_tokenizer_config: scripts/train/tokenizer_config.json
+  # If true, cp golden -> <checkpoint>/tokenizer_config.json after every training round.
+  apply_after_each_train: true

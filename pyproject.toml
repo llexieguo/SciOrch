@@ -1,0 +1,90 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sciorch"
+version = "0.1.0"
+description = "Reasoning multimodal orchestrator with delegate/submit multi-round loop, plus vendored ms-swift offline REINFORCE trainer"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+authors = [{name = "SciOrch Contributors"}]
+dependencies = [
+  # sciorch core
+  "openai>=1.37.0",
+  "anthropic>=0.44.0",
+  "PyYAML>=6.0",
+  "Pillow>=10.0.0",
+  # ms-swift / training framework (from ms-swift-offlineppo/requirements/framework.txt)
+  "datasets>=3.0,<4.0",
+  "accelerate",
+  "addict",
+  "aiohttp",
+  "attrdict",
+  "binpacking",
+  "charset_normalizer",
+  "cpm_kernels",
+  "dacite",
+  "einops",
+  "fastapi",
+  "gradio>=3.40.0,<6.0",
+  "importlib_metadata",
+  "json_repair",
+  "matplotlib",
+  "modelscope>=1.23",
+  "nltk",
+  "numpy",
+  "oss2",
+  "pandas",
+  "peft>=0.11,<0.19",
+  "requests",
+  "rouge",
+  "safetensors",
+  "scipy",
+  "sentencepiece",
+  "simplejson>=3.3.0",
+  "sortedcontainers>=1.5.9",
+  "tensorboard",
+  "tiktoken",
+  "tomli>=2.0.0; python_version < '3.11'",
+  "tqdm",
+  "transformers>=4.33,<5.6.0",
+  "transformers_stream_generator",
+  "trl>=0.15,<0.30",
+  "uvicorn",
+  "zstandard",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.23.0",
+]
+mcts_similarity = [
+  "torch>=2.0.0",
+  "transformers>=4.41.0",
+]
+
+[project.scripts]
+swift = "swift.cli.main:cli_main"
+megatron = "swift.cli._megatron.main:cli_main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sciorch*", "maslab*", "swift*", "mcts*"]
+
+[tool.setuptools.package-data]
+"swift" = [
+  "utils/*",
+  "dataset/data/*.*",
+  "config/*.json",
+  "loss_scale/config/*.json",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
